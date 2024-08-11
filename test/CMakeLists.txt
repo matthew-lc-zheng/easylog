@@ -4,7 +4,7 @@ project ("test" LANGUAGES CXX)
 set(main_target_name "Test")
 add_executable (${main_target_name} "test.cpp")
 target_compile_features(${main_target_name} PRIVATE cxx_std_20)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../library ${CMAKE_CURRENT_SOURCE_DIR}/dep_build)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../library ${CMAKE_CURRENT_SOURCE_DIR}/../dep_build)
 target_link_libraries(${main_target_name} PRIVATE "easylog")
 target_include_directories(${main_target_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 

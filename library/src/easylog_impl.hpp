@@ -36,6 +36,8 @@ private:
   void swapBuffer();
   std::string getLevelStr(easylog::Level);
   void printBufferToFile(const MsgBuffer &);
+  std::string alignedTwoDigit(int);
+  std::string alignedThreeDigit(long long);
 
 private:
   bool _ready = false;
@@ -44,6 +46,7 @@ private:
 
   std::ofstream _file;
   std::thread _worker;
+  std::mutex _mtx_log;
 
   easylog::Level _level;
   MsgBuffer *_processingBuffer = nullptr;

@@ -1,23 +1,19 @@
 #include "easylog_impl.hpp"
-#ifdef _WIN32
-#include <errhandlingapi.h>
-#endif
 
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
 #include <iomanip>
 #include <mutex>
-#include <stdexcept>
+
+static Log *_log_ = nullptr;
+static std::condition_variable _cv_;
+static std::mutex _mtx_;
+static bool _printReady_ = false;
+static bool _exitFlag_ = false;
+static const unsigned _initial_buffer_length_ = 20;
 
 namespace easylog {
-Log *_log_ = nullptr;
-std::condition_variable _cv_;
-std::mutex _mtx_;
-bool _printReady_ = false;
-bool _exitFlag_ = false;
-const unsigned _initial_buffer_length_ = 100;
-
 void launch(const char *filePath, Level level) {
   if (!_log_) {
     _log_ = new Log(level, filePath);
@@ -65,9 +61,9 @@ void fatal(const char *msg) {
 } // namespace easylog
 
 Log::Log(easylog::Level level, const char *filePath) : _level(level) {
-  easylog::_exitFlag_ = false;
-  _processingBuffer = new MsgBuffer[easylog::_initial_buffer_length_];
-  _cacheBuffer = new MsgBuffer[easylog::_initial_buffer_length_];
+  _exitFlag_ = false;
+  _processingBuffer = new MsgBuffer[_initial_buffer_length_];
+  _cacheBuffer = new MsgBuffer[_initial_buffer_length_];
   _file.open(filePath, std::fstream::app);
   if (_file.is_open()) {
     _initialized = true;
@@ -76,11 +72,14 @@ Log::Log(easylog::Level level, const char *filePath) : _level(level) {
 
 Log::~Log() {
   if (_initialized) {
-    _ready = false;
     {
-      std::lock_guard<std::mutex> lock(easylog::_mtx_);
-      easylog::_exitFlag_ = true;
-      easylog::_cv_.notify_all();
+      std::lock_guard<std::mutex> lock(_mtx_log);
+      _ready = false;
+    }
+    {
+      std::lock_guard<std::mutex> lock(_mtx_);
+      _exitFlag_ = true;
+      _cv_.notify_all();
     }
     _worker.join();
     for (size_t i = 0; i < _cacheBufferIdx; ++i) {
@@ -95,12 +94,11 @@ void Log::run() {
     return;
   }
   _worker = std::thread([this]() {
-    while (!easylog::_exitFlag_) {
-      std::unique_lock<std::mutex> lock(easylog::_mtx_);
-      easylog::_cv_.wait(
-          lock, [] { return easylog::_printReady_ || easylog::_exitFlag_; });
-      if (easylog::_printReady_) {
-        easylog::_printReady_ = false;
+    while (!_exitFlag_) {
+      std::unique_lock<std::mutex> lock(_mtx_);
+      _cv_.wait(lock, [] { return _printReady_ || _exitFlag_; });
+      if (_printReady_) {
+        _printReady_ = false;
         this->printBuffer();
       }
     }
@@ -109,25 +107,27 @@ void Log::run() {
 }
 
 void Log::log(easylog::Level level, const char *msg) {
-  if (!_ready || level < _level) {
+  if (level < _level) {
     return;
   }
-
-  if (_cacheBufferIdx < easylog::_initial_buffer_length_) {
-    _cacheBuffer[_cacheBufferIdx].msg = msg;
-    _cacheBuffer[_cacheBufferIdx].level = level;
-    _cacheBuffer[_cacheBufferIdx].date = getTime();
-  } else {
-    _cacheBufferIdx = 0;
-    std::lock_guard<std::mutex> lock(easylog::_mtx_);
-    swapBuffer();
-    easylog::_printReady_ = true;
-    easylog::_cv_.notify_all();
+  std::lock_guard<std::mutex> lock(_mtx_log);
+  if (!_ready) {
+    return;
   }
+  _cacheBuffer[_cacheBufferIdx].msg = msg;
+  _cacheBuffer[_cacheBufferIdx].level = level;
+  _cacheBuffer[_cacheBufferIdx].date = getTime();
   ++_cacheBufferIdx;
+  if (_cacheBufferIdx == _initial_buffer_length_) {
+    _cacheBufferIdx = 0;
+    std::lock_guard<std::mutex> lock(_mtx_);
+    swapBuffer();
+    _printReady_ = true;
+    _cv_.notify_all();
+  }
 }
 void Log::printBuffer() {
-  for (size_t i = 0; i < easylog::_initial_buffer_length_; ++i) {
+  for (size_t i = 0; i < _initial_buffer_length_; ++i) {
     printBufferToFile(_processingBuffer[i]);
   }
 }
@@ -182,8 +182,27 @@ std::string Log::getLevelStr(easylog::Level level) {
 
 void Log::printBufferToFile(const MsgBuffer &buffer) {
   _file << buffer.date.year << "-" << buffer.date.month << "-"
-        << buffer.date.day << " " << buffer.date.hour << ":"
-        << buffer.date.minute << ":" << buffer.date.second << "."
-        << buffer.date.millisecond << " [" << getLevelStr(buffer.level).c_str()
-        << "] " << buffer.msg << std::endl;
+        << buffer.date.day << " " << alignedTwoDigit(buffer.date.hour) << ":"
+        << alignedTwoDigit(buffer.date.minute) << ":"
+        << alignedTwoDigit(buffer.date.second) << "."
+        << alignedThreeDigit(buffer.date.millisecond) << " ["
+        << getLevelStr(buffer.level).c_str() << "] " << buffer.msg << std::endl;
+}
+
+std::string Log::alignedTwoDigit(int number) {
+  std::string str = std::to_string(number);
+  if (number < 10) {
+    str = "0" + str;
+  }
+  return str;
+}
+
+std::string Log::alignedThreeDigit(long long number) {
+  std::string str = std::to_string(number);
+  if (number < 10) {
+    str = "00" + str;
+  } else if (number < 100) {
+    str = "0" + str;
+  }
+  return str;
 }

@@ -14,44 +14,23 @@
 
 #include <sstream>
 #include <string>
+/* public interface */
+#define el_launch(...) easylog::launch(__VA_ARGS__)
+#define el_terminate easylog::terminate
 
-#define el_launch(path) easylog::launch(path)
-#define el_terminate() easylog::terminate()
-#define el_trace(msg)                                                          \
+#define el_trace(msg) el_private_stream_format(easylog::trace, msg)
+#define el_debug(msg) el_private_stream_format(easylog::debug, msg)
+#define el_info(msg) el_private_stream_format(easylog::info, msg)
+#define el_warn(msg) el_private_stream_format(easylog::warn, msg)
+#define el_error(msg) el_private_stream_format(easylog::error, msg)
+#define el_fatal(msg) el_private_stream_format(easylog::fatal, msg)
+
+/* private usage */
+#define el_private_stream_format(logger, msg)                                  \
   {                                                                            \
     std::stringstream ss;                                                      \
     ss << msg;                                                                 \
-    easylog::trace(ss.str().c_str());                                          \
-  }
-#define el_debug(msg)                                                          \
-  {                                                                            \
-    std::stringstream ss;                                                      \
-    ss << msg;                                                                 \
-    easylog::debug(ss.str().c_str());                                          \
-  }
-#define el_info(msg)                                                           \
-  {                                                                            \
-    std::stringstream ss;                                                      \
-    ss << msg;                                                                 \
-    easylog::info(ss.str().c_str());                                           \
-  }
-#define el_warn(msg)                                                           \
-  {                                                                            \
-    std::stringstream ss;                                                      \
-    ss << msg;                                                                 \
-    easylog::warn(ss.str().c_str());                                           \
-  }
-#define el_error(msg)                                                          \
-  {                                                                            \
-    std::stringstream ss;                                                      \
-    ss << msg;                                                                 \
-    easylog::error(ss.str().c_str());                                          \
-  }
-#define el_fatal(msg)                                                          \
-  {                                                                            \
-    std::stringstream ss;                                                      \
-    ss << msg;                                                                 \
-    easylog::fatal(ss.str().c_str());                                          \
+    logger(ss.str().c_str());                                                  \
   }
 
 namespace easylog {
