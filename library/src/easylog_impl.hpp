@@ -3,6 +3,7 @@
 #include "easylog.hpp"
 
 #include <fstream>
+#include <mutex>
 #include <thread>
 
 struct Timestamp {
@@ -36,8 +37,7 @@ private:
   void swapBuffer();
   std::string getLevelStr(easylog::Level);
   void printBufferToFile(const MsgBuffer &);
-  std::string alignedTwoDigit(int);
-  std::string alignedThreeDigit(long long);
+  std::string dateStr(const Timestamp &);
 
 private:
   bool _ready = false;
@@ -47,8 +47,9 @@ private:
   std::ofstream _file;
   std::thread _worker;
   std::mutex _mtx_log;
+  std::mutex _mtx_buffer;
 
   easylog::Level _level;
-  MsgBuffer *_processingBuffer = nullptr;
-  MsgBuffer *_cacheBuffer = nullptr;
+  std::unique_ptr<MsgBuffer[]> _processingBuffer = nullptr;
+  std::unique_ptr<MsgBuffer[]> _cacheBuffer = nullptr;
 };

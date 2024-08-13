@@ -4,14 +4,13 @@
 #include <condition_variable>
 #include <fstream>
 #include <iomanip>
-#include <mutex>
 
 static Log *_log_ = nullptr;
 static std::condition_variable _cv_;
 static std::mutex _mtx_;
 static bool _printReady_ = false;
 static bool _exitFlag_ = false;
-static const unsigned _initial_buffer_length_ = 20;
+const unsigned _initial_buffer_length_ = 10;
 
 namespace easylog {
 void launch(const char *filePath, Level level) {
@@ -62,8 +61,8 @@ void fatal(const char *msg) {
 
 Log::Log(easylog::Level level, const char *filePath) : _level(level) {
   _exitFlag_ = false;
-  _processingBuffer = new MsgBuffer[_initial_buffer_length_];
-  _cacheBuffer = new MsgBuffer[_initial_buffer_length_];
+  _processingBuffer = std::make_unique<MsgBuffer[]>(_initial_buffer_length_);
+  _cacheBuffer = std::make_unique<MsgBuffer[]>(_initial_buffer_length_);
   _file.open(filePath, std::fstream::app);
   if (_file.is_open()) {
     _initialized = true;
@@ -82,8 +81,11 @@ Log::~Log() {
       _cv_.notify_all();
     }
     _worker.join();
-    for (size_t i = 0; i < _cacheBufferIdx; ++i) {
-      printBufferToFile(_cacheBuffer[i]);
+    {
+      std::lock_guard<std::mutex> lock(_mtx_buffer);
+      for (size_t i = 0; i < _cacheBufferIdx; ++i) {
+        printBufferToFile(_cacheBuffer[i]);
+      }
     }
     _file.close();
   }
@@ -120,13 +122,15 @@ void Log::log(easylog::Level level, const char *msg) {
   ++_cacheBufferIdx;
   if (_cacheBufferIdx == _initial_buffer_length_) {
     _cacheBufferIdx = 0;
-    std::lock_guard<std::mutex> lock(_mtx_);
     swapBuffer();
+    std::lock_guard<std::mutex> lock(_mtx_);
     _printReady_ = true;
     _cv_.notify_all();
   }
 }
+
 void Log::printBuffer() {
+  std::lock_guard<std::mutex> lock(_mtx_buffer);
   for (size_t i = 0; i < _initial_buffer_length_; ++i) {
     printBufferToFile(_processingBuffer[i]);
   }
@@ -151,9 +155,8 @@ Timestamp Log::getTime() {
 }
 
 void Log::swapBuffer() {
-  auto temp = _cacheBuffer;
-  _cacheBuffer = _processingBuffer;
-  _processingBuffer = temp;
+  std::lock_guard<std::mutex> lock(_mtx_buffer);
+  std::swap(_cacheBuffer, _processingBuffer);
 }
 
 std::string Log::getLevelStr(easylog::Level level) {
@@ -181,28 +184,25 @@ std::string Log::getLevelStr(easylog::Level level) {
 }
 
 void Log::printBufferToFile(const MsgBuffer &buffer) {
-  _file << buffer.date.year << "-" << buffer.date.month << "-"
-        << buffer.date.day << " " << alignedTwoDigit(buffer.date.hour) << ":"
-        << alignedTwoDigit(buffer.date.minute) << ":"
-        << alignedTwoDigit(buffer.date.second) << "."
-        << alignedThreeDigit(buffer.date.millisecond) << " ["
-        << getLevelStr(buffer.level).c_str() << "] " << buffer.msg << std::endl;
+  _file << dateStr(buffer.date) << " [" << getLevelStr(buffer.level).c_str()
+        << "] " << buffer.msg << std::endl;
 }
 
-std::string Log::alignedTwoDigit(int number) {
-  std::string str = std::to_string(number);
-  if (number < 10) {
-    str = "0" + str;
-  }
-  return str;
-}
-
-std::string Log::alignedThreeDigit(long long number) {
-  std::string str = std::to_string(number);
-  if (number < 10) {
-    str = "00" + str;
-  } else if (number < 100) {
-    str = "0" + str;
-  }
-  return str;
+std::string Log::dateStr(const Timestamp &ts) {
+  std::ostringstream oss;
+  oss << ts.year << "-";
+  oss.fill('0');
+  oss.width(2);
+  oss << ts.month << "-";
+  oss.width(2);
+  oss << ts.day << " ";
+  oss.width(2);
+  oss << ts.hour << ":";
+  oss.width(2);
+  oss << ts.minute << ":";
+  oss.width(2);
+  oss << ts.second << ".";
+  oss.width(3);
+  oss << ts.millisecond << " ";
+  return oss.str();
 }
